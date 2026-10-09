@@ -4,10 +4,9 @@
   --color-brandGreen: #00E676;
 }
 
-/* Definición de la variante oscura utilizando @custom-variant recomendado en Tailwind v4 */
+/* Habilita la variante para la clase .dark en Tailwind v4 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Estilos base opcionales */
 body {
   background-color: #121212;
   color: #ffffff;
