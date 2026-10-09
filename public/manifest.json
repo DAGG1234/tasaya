@@ -1,0 +1,24 @@
+{
+  "name": "TasaYa",
+  "short_name": "TasaYa",
+  "description": "Conversor rápido y ligero de tasa de cambio oficial BCV y USDT Binance a Bolívares.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#00E676",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logoTasaYa.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logoTasaYa.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

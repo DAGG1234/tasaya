@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brandGreen: #00E676;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+/* Modo Claro: Gris suave de bajo brillo que no encandila */
+html {
+  background-color: #f4f4f5;
+  color: #18181b;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Modo Oscuro: Negro elegante */
+html.dark {
+  background-color: #121212;
+  color: #f4f4f5;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
