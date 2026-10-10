@@ -11,7 +11,7 @@ const copiedField = ref<string | null>(null);
 const bankInfo = {
   bank: 'Banco Venezolano de Credito (0104)',
   phone: '04141235400',
-  idCard: '04141235400',
+  idCard: '31467533',
 };
 
 const copyToClipboard = (text: string, fieldKey: string) => {
