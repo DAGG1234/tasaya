@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 
 export const useThemeStore = defineStore('theme', () => {
   const theme = ref<'dark' | 'light'>('dark');
+
+  const isDark = computed(() => theme.value === 'dark');
 
   const applyTheme = (newTheme: 'dark' | 'light') => {
     theme.value = newTheme;
@@ -35,6 +37,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   return {
     theme,
+    isDark,
     toggleTheme,
     initTheme,
   };

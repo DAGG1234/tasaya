@@ -10,12 +10,12 @@ const themeStore = useThemeStore();
 </script>
 
 <template>
-  <header class="w-full h-20 flex items-center justify-between px-6 sm:px-10 border-b border-zinc-300/60 dark:border-zinc-800/80 bg-zinc-200/50 dark:bg-[#121212]/80 backdrop-blur-md shrink-0 transition-colors">
+  <header class="w-full h-20 flex items-center justify-between px-6 sm:px-10 border-b border-zinc-200 dark:border-zinc-800/80 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md shrink-0 transition-colors">
     
     <!-- Logotipo con color adaptativo según el modo -->
     <div class="flex items-center space-x-3.5">
       <div 
-        class="logo-gigante w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center shrink-0 drop-shadow-[0_0_10px_rgba(0,230,118,0.3)]"
+        class="logo-gigante w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center shrink-0 drop-shadow-[0_0_10px_rgba(0,230,118,0.2)]"
         v-html="logoSvgRaw"
       ></div>
 
@@ -29,7 +29,7 @@ const themeStore = useThemeStore();
       <!-- Apoyar -->
       <button
         @click="onOpenDonation"
-        class="h-11 px-4 rounded-full bg-white hover:bg-zinc-50 dark:bg-zinc-800/60 dark:hover:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200 hover:text-emerald-600 dark:hover:text-brandGreen transition-all flex items-center gap-2 text-sm font-semibold border border-zinc-300/80 dark:border-zinc-700/40 shadow-sm cursor-pointer"
+        class="h-11 px-4 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800/60 dark:hover:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200 hover:text-emerald-600 dark:hover:text-brandGreen transition-all flex items-center gap-2 text-sm font-semibold border border-zinc-200 dark:border-zinc-700/40 shadow-sm cursor-pointer"
         title="Donar / Pago Móvil"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-emerald-600 dark:text-brandGreen" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -41,7 +41,7 @@ const themeStore = useThemeStore();
       <!-- Alternador de Tema -->
       <button
         @click="themeStore.toggleTheme()"
-        class="h-11 w-11 rounded-full bg-white hover:bg-zinc-50 dark:bg-zinc-800/60 dark:hover:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200 transition-all flex items-center justify-center border border-zinc-300/80 dark:border-zinc-700/40 shadow-sm cursor-pointer active:scale-95"
+        class="h-11 w-11 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800/60 dark:hover:bg-zinc-700/60 text-zinc-700 dark:text-zinc-200 transition-all flex items-center justify-center border border-zinc-200 dark:border-zinc-700/40 shadow-sm cursor-pointer active:scale-95"
         :title="themeStore.theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'"
       >
         <svg v-if="themeStore.theme === 'dark'" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -64,13 +64,14 @@ const themeStore = useThemeStore();
   width: 100% !important;
   height: 100% !important;
 }
-/* Color dinámico para el logo en modo claro / oscuro */
+/* Color dinámico para el logo en modo claro */
 .logo-gigante :deep(path),
 .logo-gigante :deep(polygon),
 .logo-gigante :deep(circle),
 .logo-gigante :deep(g) {
   fill: #059669 !important;
 }
+/* Color dinámico para el logo en modo oscuro (.dark) */
 :global(.dark) .logo-gigante :deep(path),
 :global(.dark) .logo-gigante :deep(polygon),
 :global(.dark) .logo-gigante :deep(circle),
