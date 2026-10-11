@@ -1,269 +1,356 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
-import { getBcvRate } from '../services/bcvService';
-import { getUsdtRate } from '../services/usdtService';
-import RateSelector from './RateSelector.vue';
+import { ref, computed, onMounted, watch } from 'vue';
+import RateSelector, { type RateType } from './RateSelector.vue';
+import RateHistoryModal from './RateHistoryModal.vue';
+import UpcomingRateButton from './UpcomingRateButton.vue';
+import { getBcvRate, type BcvResult } from '../services/bcvService';
+import { getUsdtRate, type UsdtResult } from '../services/usdtService';
+import { getEuroRate, type EuroResult } from '../services/euroService';
+import { saveTodayRateToHistory } from '../services/historyService';
 
-const activeTab = ref<'BCV' | 'USDT'>('BCV');
-// Mantenemos el input como string para permitir tipear decimales libremente (ej: "12.5" o "12,5")
-const amountInput = ref<string>('1');
-const isInverse = ref(false); // false: USD -> VES | true: VES -> USD
+const selectedRateType = ref<RateType>('BCV');
+const bcvData = ref<BcvResult | null>(null);
+const usdtData = ref<UsdtResult | null>(null);
+const euroData = ref<EuroResult | null>(null);
 
-const rateValue = ref<number>(0);
-const updatedAt = ref<string>('');
-const isOffline = ref<boolean>(false);
-const isLoading = ref<boolean>(true);
-const errorMessage = ref<string | null>(null);
-const isRotating = ref(false);
-const isCopied = ref(false);
+const activeOverride = ref<{ rate: number; label: string } | null>(null);
 
-const fetchCurrentRate = async () => {
+const isLoading = ref(false);
+const isForeignToVes = ref(true);
+const foreignAmount = ref<string>('1');
+const vesAmount = ref<string>('');
+const copied = ref(false);
+
+const fetchAllRates = async () => {
   isLoading.value = true;
-  errorMessage.value = null;
   try {
-    if (activeTab.value === 'BCV') {
-      const data = await getBcvRate();
-      rateValue.value = data.rate;
-      updatedAt.value = data.updatedAt;
-      isOffline.value = data.isOffline;
-    } else {
-      const data = await getUsdtRate();
-      rateValue.value = data.rate;
-      updatedAt.value = data.updatedAt;
-      isOffline.value = data.isOffline;
-    }
-  } catch (error: any) {
-    errorMessage.value = error.message || 'Error al obtener la tasa de cambio.';
+    const [bcvRes, usdtRes, euroRes] = await Promise.all([
+      getBcvRate(),
+      getUsdtRate(),
+      getEuroRate(),
+    ]);
+
+    bcvData.value = bcvRes;
+    usdtData.value = usdtRes;
+    euroData.value = euroRes;
+
+    if (bcvRes?.rate) saveTodayRateToHistory('BCV', bcvRes.rate, bcvRes.updatedAt);
+    if (usdtRes?.rate) saveTodayRateToHistory('USDT', usdtRes.rate, usdtRes.updatedAt);
+    if (euroRes?.rate) saveTodayRateToHistory('EUR', euroRes.rate, euroRes.updatedAt);
+
+    calculateValues();
+  } catch (error) {
+    console.error('Error al actualizar las tasas:', error);
   } finally {
     isLoading.value = false;
   }
 };
 
-watch(activeTab, () => {
-  fetchCurrentRate();
-});
-
 onMounted(() => {
-  fetchCurrentRate();
+  fetchAllRates();
 });
 
-// Parsea la entrada limpia soportando tanto coma como punto decimal
-const parsedInputNumber = computed(() => {
-  if (!amountInput.value) return 0;
-  const cleanStr = amountInput.value.replace(',', '.');
-  const num = parseFloat(cleanStr);
-  return isNaN(num) ? 0 : num;
-});
-
-// Valor numérico directo del resultado para usar en el Swap
-const rawResultNumber = computed(() => {
-  const num = parsedInputNumber.value;
-  if (num <= 0 || !rateValue.value) return 0;
-
-  if (!isInverse.value) {
-    return num * rateValue.value; // USD -> VES
-  } else {
-    return num / rateValue.value; // VES -> USD
+const baseRate = computed(() => {
+  switch (selectedRateType.value) {
+    case 'EUR': return euroData.value?.rate ?? null;
+    case 'USDT': return usdtData.value?.rate ?? null;
+    case 'BCV':
+    default: return bcvData.value?.rate ?? null;
   }
 });
 
-// Resultado formateado para mostrar en pantalla
-const convertedResult = computed(() => {
-  const raw = rawResultNumber.value;
-  if (raw <= 0) return '0,00';
+const currentRate = computed(() => {
+  if (activeOverride.value) {
+    return activeOverride.value.rate;
+  }
+  return baseRate.value;
+});
 
-  if (!isInverse.value) {
-    return raw.toLocaleString('es-VE', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    });
-  } else {
-    const maxDigits = raw < 0.01 && raw > 0 ? 4 : 2;
-    return raw.toLocaleString('es-VE', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: maxDigits 
-    });
+const currencySymbol = computed(() => {
+  switch (selectedRateType.value) {
+    case 'EUR': return '€';
+    case 'USDT': return 'USDT';
+    case 'BCV':
+    default: return '$';
   }
 });
 
-const copyResultToClipboard = () => {
-  if (isLoading.value || !convertedResult.value) return;
-  navigator.clipboard.writeText(convertedResult.value);
-  isCopied.value = true;
-  setTimeout(() => {
-    isCopied.value = false;
-  }, 2000);
+const currencyLabel = computed(() => {
+  switch (selectedRateType.value) {
+    case 'EUR': return 'EURO BCV';
+    case 'USDT': return 'USDT BINANCE';
+    case 'BCV':
+    default: return 'DÓLAR BCV';
+  }
+});
+
+const calculateValues = () => {
+  const rate = currentRate.value;
+  if (!rate || rate <= 0) {
+    vesAmount.value = '';
+    return;
+  }
+
+  if (isForeignToVes.value) {
+    const num = parseFloat(foreignAmount.value);
+    if (isNaN(num) || num < 0) {
+      vesAmount.value = '';
+      return;
+    }
+    vesAmount.value = (num * rate).toFixed(2);
+  } else {
+    const num = parseFloat(vesAmount.value);
+    if (isNaN(num) || num < 0) {
+      foreignAmount.value = '';
+      return;
+    }
+    foreignAmount.value = (num / rate).toFixed(2);
+  }
 };
 
-// Al hacer Swap, mantenemos el monto calculado pasando el resultado como la nueva entrada
-const toggleSwapDirection = () => {
-  isRotating.value = true;
-  setTimeout(() => {
-    isRotating.value = false;
-  }, 300);
+watch(selectedRateType, () => {
+  activeOverride.value = null;
+  calculateValues();
+});
 
-  const currentResult = rawResultNumber.value;
-  
-  isInverse.value = !isInverse.value;
+watch(currentRate, () => {
+  calculateValues();
+});
 
-  // Asignamos el valor obtenido ajustándolo a máximo 2 o 4 decimales limpios
-  if (currentResult > 0) {
-    const decimals = isInverse.value && currentResult < 0.01 ? 4 : 2;
-    amountInput.value = currentResult.toFixed(decimals);
+// Corrección de TypeScript: Se reemplaza 'year' no utilizado por '_'
+const handleHistoricalRateSelected = (payload: { rate: number; date: string }) => {
+  const [_, month, day] = payload.date.split('-');
+  activeOverride.value = {
+    rate: payload.rate,
+    label: `Histórica (${day}/${month})`,
+  };
+  calculateValues();
+};
+
+const handleUpcomingRateApplied = (payload: { rate: number; isOfficial: boolean }) => {
+  let labelPrefix = 'Dólar BCV Mañana';
+  if (selectedRateType.value === 'EUR') labelPrefix = 'Euro BCV Mañana';
+
+  activeOverride.value = {
+    rate: payload.rate,
+    label: payload.isOfficial ? `${labelPrefix} Oficial` : `${labelPrefix} Aprox.`,
+  };
+  calculateValues();
+};
+
+const resetToToday = () => {
+  activeOverride.value = null;
+  calculateValues();
+};
+
+const handleForeignInput = () => {
+  isForeignToVes.value = true;
+  calculateValues();
+};
+
+const handleVesInput = () => {
+  isForeignToVes.value = false;
+  calculateValues();
+};
+
+const toggleDirection = () => {
+  isForeignToVes.value = !isForeignToVes.value;
+  calculateValues();
+};
+
+const formattedVesResult = computed(() => {
+  if (!currentRate.value) return 'Sin conexión';
+  const val = parseFloat(vesAmount.value);
+  if (isNaN(val)) return '0,00';
+  return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+});
+
+const formattedActiveRate = computed(() => {
+  const rate = currentRate.value;
+  if (!rate) return 'Tasa no disponible';
+  return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(rate);
+});
+
+const copyToClipboard = async () => {
+  if (!vesAmount.value || !currentRate.value) return;
+  try {
+    await navigator.clipboard.writeText(formattedVesResult.value);
+    copied.value = true;
+    setTimeout(() => { copied.value = false; }, 2000);
+  } catch (err) {
+    console.error('Error al copiar:', err);
   }
 };
 </script>
 
 <template>
-  <div class="w-full max-w-xl mx-auto space-y-6">
-    <!-- Selector de Tasa Activa -->
-    <RateSelector v-model="activeTab" />
+  <div class="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-4 sm:p-6 shadow-xl transition-all space-y-4">
+    
+    <!-- Selector de Monedas -->
+    <RateSelector v-model="selectedRateType" />
 
-    <!-- Tarjeta Principal del Conversor -->
-    <div class="bg-white dark:bg-[#18181B] rounded-3xl p-6 sm:p-8 shadow-2xl shadow-zinc-200/50 dark:shadow-black/70 border border-zinc-200/80 dark:border-zinc-800/80 transition-all relative overflow-hidden">
-      
-      <!-- Aviso de Modo Sin Conexión -->
-      <transition
-        enter-active-class="transition duration-300 ease-out"
-        enter-from-class="transform -translate-y-2 opacity-0"
-        enter-to-class="transform translate-y-0 opacity-100"
-        leave-active-class="transition duration-200 ease-in"
-        leave-from-class="transform translate-y-0 opacity-100"
-        leave-to-class="transform -translate-y-2 opacity-0"
+    <!-- Badge si se está usando un modo de Override (Histórica o Mañana) -->
+    <div
+      v-if="activeOverride"
+      class="p-2.5 px-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-700 dark:text-amber-400 font-bold"
+    >
+      <div class="flex items-center gap-1.5 truncate">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <span class="truncate">Modo: {{ activeOverride.label }}</span>
+      </div>
+
+      <button
+        @click="resetToToday"
+        type="button"
+        class="px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-300 font-extrabold text-[11px] transition-colors cursor-pointer shrink-0"
       >
-        <div v-if="isOffline" class="mb-5 py-2.5 px-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-3 text-amber-600 dark:text-amber-400 text-xs sm:text-sm font-medium">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <span>Modo sin conexión: Usando última cotización en caché.</span>
-        </div>
-      </transition>
+        Volver a hoy
+      </button>
+    </div>
 
-      <div class="space-y-4 relative">
-        
-        <!-- Bloque Superior: Entrada de Origen (Editable) -->
-        <div class="p-5 sm:p-6 rounded-2xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200/60 dark:border-zinc-800/60 space-y-2 transition-colors">
-          <div class="flex justify-between items-center text-xs font-semibold text-zinc-400 uppercase tracking-wider">
-            <span>{{ !isInverse ? (activeTab === 'BCV' ? 'Dólar Oficial' : 'USDT Binance') : 'Bolívares' }}</span>
-            <span class="px-2.5 py-1 rounded-lg bg-zinc-200/70 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-bold">
-              {{ !isInverse ? 'USD' : 'VES' }}
-            </span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-3xl font-bold text-zinc-400 mr-3">{{ !isInverse ? '$' : 'Bs.' }}</span>
-            
-            <!-- Input editable flexible para decimales -->
-            <input
-              v-model="amountInput"
-              type="text"
-              inputmode="decimal"
-              placeholder="0.00"
-              class="w-full bg-transparent text-3xl sm:text-4xl font-extrabold text-zinc-900 dark:text-white focus:outline-none text-right tracking-tight"
-            />
-          </div>
+    <!-- Error Si No hay Tasa -->
+    <div v-if="!currentRate && !isLoading" class="p-3 bg-red-500/10 border border-red-500/30 rounded-2xl text-center text-xs text-red-600 dark:text-red-400 font-semibold flex items-center justify-center gap-2">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <span>Sin conexión / Tasa no disponible. Verifique su acceso a internet.</span>
+    </div>
+
+    <!-- Campos del Conversor -->
+    <div class="relative flex flex-col gap-3 pt-1">
+      
+      <!-- Entrada Divisa Extranjera -->
+      <div class="p-4 rounded-2xl border bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/60">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            {{ currencyLabel }}
+          </span>
+          <span class="text-xs font-black px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200">
+            {{ selectedRateType === 'BCV' ? 'USD' : selectedRateType }}
+          </span>
         </div>
 
-        <!-- Botón Central Flotante de Inversión (Swap) -->
-        <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-          <button
-            @click="toggleSwapDirection"
-            :class="[
-              'w-12 h-12 rounded-full bg-white dark:bg-zinc-900 text-emerald-600 dark:text-brandGreen border-2 border-zinc-200 dark:border-zinc-700 flex items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer',
-              isRotating ? 'rotate-180' : 'rotate-0'
-            ]"
-            title="Invertir conversión"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-            </svg>
-          </button>
-        </div>
-
-        <!-- Bloque Inferior: Resultado de Destino (Calculado) -->
-        <div class="p-5 sm:p-6 rounded-2xl bg-emerald-500/5 dark:bg-emerald-950/15 border border-emerald-500/20 dark:border-emerald-500/20 space-y-2 transition-colors relative">
-          <div class="flex justify-between items-center text-xs font-semibold text-emerald-600/80 dark:text-brandGreen/80 uppercase tracking-wider">
-            <span>{{ !isInverse ? 'Bolívares' : (activeTab === 'BCV' ? 'Dólar Oficial' : 'USDT Binance') }}</span>
-            
-            <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-brandGreen text-xs font-bold">
-                {{ !isInverse ? 'VES' : 'USD' }}
-              </span>
-            </div>
-          </div>
-
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-3xl font-bold text-emerald-600 dark:text-brandGreen">{{ !isInverse ? 'Bs.' : '$' }}</span>
-            
-            <div class="flex-1 text-right truncate">
-              <span v-if="isLoading" class="animate-pulse text-zinc-400 text-xl">Calculando...</span>
-              <span v-else class="text-3xl sm:text-4xl font-black text-zinc-900 dark:text-white tracking-tight">
-                {{ convertedResult }}
-              </span>
-            </div>
-
-            <!-- Botón de Copiar Resultado -->
-            <div class="relative shrink-0">
-              <button
-                @click="copyResultToClipboard"
-                :class="[
-                  'w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all duration-200 active:scale-90 shadow-md border cursor-pointer',
-                  isCopied
-                    ? 'bg-emerald-500 text-white border-emerald-400 dark:bg-brandGreen dark:text-zinc-950 dark:border-brandGreen shadow-emerald-500/30'
-                    : 'bg-emerald-500/15 hover:bg-emerald-500/25 dark:bg-emerald-500/20 dark:hover:bg-emerald-500/30 text-emerald-600 dark:text-brandGreen border-emerald-500/30'
-                ]"
-                :title="isCopied ? '¡Copiado!' : 'Copiar monto'"
-              >
-                <svg v-if="!isCopied" xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-
-                <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
-                </svg>
-              </button>
-
-              <!-- Notificación Flotante -->
-              <transition
-                enter-active-class="transition duration-200 ease-out"
-                enter-from-class="opacity-0 translate-y-1 scale-90"
-                enter-to-class="opacity-100 translate-y-0 scale-100"
-                leave-active-class="transition duration-150 ease-in"
-                leave-from-class="opacity-100 translate-y-0 scale-100"
-                leave-to-class="opacity-0 translate-y-1 scale-90"
-              >
-                <span
-                  v-if="isCopied"
-                  class="absolute -top-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-[10px] font-bold tracking-wide shadow-xl whitespace-nowrap pointer-events-none"
-                >
-                  ¡Copiado!
-                </span>
-              </transition>
-            </div>
-          </div>
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-2xl font-black text-emerald-600 dark:text-brandGreen shrink-0 select-none">
+            {{ currencySymbol }}
+          </span>
+          <input
+            v-model="foreignAmount"
+            @input="handleForeignInput"
+            type="number"
+            step="any"
+            placeholder="0"
+            :disabled="!currentRate"
+            class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400 disabled:opacity-50"
+          />
         </div>
       </div>
 
-      <!-- Pie de la Tarjeta -->
-      <div class="mt-6 pt-5 border-t border-zinc-100 dark:border-zinc-800/80 flex flex-col sm:flex-row items-center justify-between text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 gap-3">
-        <div class="flex items-center gap-2">
-          <span class="text-zinc-400">Tasa activa:</span>
-          <span class="font-semibold text-zinc-800 dark:text-zinc-200">
-            <span v-if="isLoading">Cargando...</span>
-            <span v-else>1 USD = Bs. {{ rateValue.toLocaleString('es-VE', { minimumFractionDigits: 2 }) }}</span>
-          </span>
-        </div>
-        <button 
-          @click="fetchCurrentRate"
-          class="hover:text-emerald-600 dark:hover:text-brandGreen transition-colors flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/60 font-medium cursor-pointer"
-          title="Actualizar tasa"
+      <!-- Botón Swap (Invertir) -->
+      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+        <button
+          @click="toggleDirection"
+          :disabled="!currentRate"
+          class="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-700 text-emerald-600 dark:text-brandGreen flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+          title="Invertir conversión"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" :class="{ 'animate-spin': isLoading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 transition-transform duration-300" :class="{ 'rotate-180': !isForeignToVes }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
           </svg>
-          <span>Actualizar</span>
         </button>
       </div>
 
+      <!-- Entrada / Salida Bolívares -->
+      <div class="p-4 rounded-2xl border bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/30 dark:border-emerald-500/20">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+            Bolívares
+          </span>
+          <span class="text-xs font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-800 dark:text-brandGreen">
+            VES
+          </span>
+        </div>
+
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-2xl font-black text-emerald-600 dark:text-brandGreen shrink-0 select-none">
+            Bs.
+          </span>
+          <div class="flex items-center gap-2 w-full justify-end">
+            <input
+              v-if="!isForeignToVes && currentRate"
+              v-model="vesAmount"
+              @input="handleVesInput"
+              type="number"
+              step="any"
+              placeholder="0"
+              class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400"
+            />
+            <span v-else :class="['text-3xl font-black truncate', currentRate ? 'text-zinc-900 dark:text-white' : 'text-red-500 text-base']">
+              {{ formattedVesResult }}
+            </span>
+
+            <button
+              v-if="currentRate"
+              @click="copyToClipboard"
+              class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-brandGreen transition-all cursor-pointer active:scale-95 shrink-0"
+              title="Copiar monto"
+            >
+              <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+              </svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
+
+    <!-- Módulo de Tasa Próxima (Se oculta automáticamente si es USDT) -->
+    <UpcomingRateButton
+      :activeType="selectedRateType"
+      :currentRate="baseRate"
+      @applyUpcomingRate="handleUpcomingRateApplied"
+    />
+
+    <!-- Pie: Tasa Activa y Botón de Recarga -->
+    <div class="pt-2 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400 font-medium border-t border-zinc-100 dark:border-zinc-800">
+      <div class="flex items-center gap-1">
+        <span>Tasa activa:</span>
+        <strong class="text-zinc-800 dark:text-zinc-200 font-bold">
+          <template v-if="currentRate">
+            1 {{ selectedRateType === 'BCV' ? 'USD' : selectedRateType }} = Bs. {{ formattedActiveRate }}
+          </template>
+          <template v-else>
+            Tasa no disponible
+          </template>
+        </strong>
+      </div>
+
+      <button
+        @click="fetchAllRates"
+        :disabled="isLoading"
+        class="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer disabled:opacity-50"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>{{ isLoading ? 'Buscando...' : 'Reintentar' }}</span>
+      </button>
+    </div>
+
+    <!-- Modal para Seleccionar Fecha Histórica -->
+    <div class="pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
+      <RateHistoryModal
+        :activeType="selectedRateType"
+        :currentRate="currentRate"
+        @selectHistoricalRate="handleHistoricalRateSelected"
+      />
+    </div>
+
   </div>
 </template>

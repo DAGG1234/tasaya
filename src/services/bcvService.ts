@@ -1,63 +1,52 @@
-import axios from 'axios';
-
 export interface BcvResult {
   rate: number;
   updatedAt: string;
   isOffline: boolean;
 }
 
-const BCV_CACHE_KEY = 'bcv_cache';
-// Endpoint directo y oficial de DolarApi para Venezuela
-const API_URL = 'https://ve.dolarapi.com/v1/dolares/oficial';
+const LOCAL_STORAGE_BCV_KEY = 'bcv_cache';
 
-/**
- * Consulta la tasa de cambio oficial del BCV.
- * En caso de fallo de red, recupera el último valor guardado en localStorage.
- */
-export async function getBcvRate(): Promise<BcvResult> {
+export const getBcvRate = async (): Promise<BcvResult | null> => {
   try {
-    const response = await axios.get<any>(API_URL);
-    const data = response.data;
+    const res = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+    if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
 
-    // DolarApi /v1/dolares/oficial devuelve directamente un objeto con la propiedad 'promedio' o 'precio'
-    const rawPrice = data?.promedio ?? data?.precio ?? data?.valor;
-    const rate = Number(rawPrice);
+    const data = await res.json();
+    let rawValue = data.promedio || data.price || data.precio || data.value;
 
-    if (isNaN(rate) || rate <= 0) {
-      throw new Error('La respuesta de la API no contiene un valor numérico válido para el BCV.');
+    if (typeof rawValue === 'string') {
+      rawValue = rawValue.replace(',', '.');
     }
 
-    const result: BcvResult = {
-      rate,
-      updatedAt: data?.fechaActualizacion || new Date().toISOString(),
-      isOffline: false,
-    };
-
-    // Guardar en caché local
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(BCV_CACHE_KEY, JSON.stringify(result));
+    const rate = Number(rawValue);
+    if (!isNaN(rate) && rate > 0) {
+      const result: BcvResult = {
+        rate,
+        updatedAt: data.fechaActualizacion || new Date().toISOString(),
+        isOffline: false,
+      };
+      localStorage.setItem(LOCAL_STORAGE_BCV_KEY, JSON.stringify(result));
+      return result;
     }
-
-    return result;
+    throw new Error('Estructura de respuesta inválida para BCV Dólar');
   } catch (error) {
-    console.warn('Error al consultar BCV. Usando caché local...', error);
+    console.warn('Error al consultar la API de BCV Dólar, intentando caché:', error);
 
-    if (typeof window !== 'undefined') {
-      const cachedData = localStorage.getItem(BCV_CACHE_KEY);
-      if (cachedData) {
-        const parsed: BcvResult = JSON.parse(cachedData);
-        return {
-          ...parsed,
-          isOffline: true,
-        };
+    const cached = localStorage.getItem(LOCAL_STORAGE_BCV_KEY);
+    if (cached) {
+      try {
+        const parsed: BcvResult = JSON.parse(cached);
+        if (parsed && typeof parsed.rate === 'number' && parsed.rate > 0) {
+          return {
+            ...parsed,
+            isOffline: true,
+          };
+        }
+      } catch (e) {
+        console.error('Error al parsear el caché de BCV:', e);
       }
     }
 
-    // Respaldo de emergencia si no hay red ni caché previa
-    return {
-      rate: 36.50,
-      updatedAt: new Date().toISOString(),
-      isOffline: true,
-    };
+    return null;
   }
-}
+};
