@@ -87,20 +87,21 @@ const currencyLabel = computed(() => {
 const calculateValues = () => {
   const rate = currentRate.value;
   if (!rate || rate <= 0) {
-    vesAmount.value = '';
+    if (isForeignToVes.value) vesAmount.value = '';
+    else foreignAmount.value = '';
     return;
   }
 
   if (isForeignToVes.value) {
     const num = parseFloat(foreignAmount.value);
-    if (isNaN(num) || num < 0) {
+    if (isNaN(num)) {
       vesAmount.value = '';
       return;
     }
     vesAmount.value = (num * rate).toFixed(2);
   } else {
     const num = parseFloat(vesAmount.value);
-    if (isNaN(num) || num < 0) {
+    if (isNaN(num)) {
       foreignAmount.value = '';
       return;
     }
@@ -117,9 +118,8 @@ watch(currentRate, () => {
   calculateValues();
 });
 
-// Corrección de TypeScript: Se reemplaza 'year' no utilizado por '_'
 const handleHistoricalRateSelected = (payload: { rate: number; date: string }) => {
-  const [_, month, day] = payload.date.split('-');
+  const [, month, day] = payload.date.split('-');
   activeOverride.value = {
     rate: payload.rate,
     label: `Histórica (${day}/${month})`,
@@ -154,7 +154,22 @@ const handleVesInput = () => {
 };
 
 const toggleDirection = () => {
+  if (!currentRate.value) return;
+
+  const rate = currentRate.value;
   isForeignToVes.value = !isForeignToVes.value;
+
+  if (!isForeignToVes.value) {
+    const currentVes = parseFloat(vesAmount.value);
+    if (isNaN(currentVes) || currentVes <= 0) {
+      const numForeign = parseFloat(foreignAmount.value) || 1;
+      vesAmount.value = (numForeign * rate).toFixed(2);
+    }
+  } else {
+    const numForeign = parseFloat(foreignAmount.value) || 1;
+    vesAmount.value = (numForeign * rate).toFixed(2);
+  }
+
   calculateValues();
 };
 
@@ -165,16 +180,22 @@ const formattedVesResult = computed(() => {
   return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
 });
 
+const formattedForeignResult = computed(() => {
+  const val = parseFloat(foreignAmount.value);
+  if (isNaN(val)) return '0,00';
+  return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+});
+
 const formattedActiveRate = computed(() => {
   const rate = currentRate.value;
   if (!rate) return 'Tasa no disponible';
   return new Intl.NumberFormat('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 3 }).format(rate);
 });
 
-const copyToClipboard = async () => {
-  if (!vesAmount.value || !currentRate.value) return;
+const copyToClipboard = async (textToCopy: string) => {
+  if (!textToCopy || !currentRate.value) return;
   try {
-    await navigator.clipboard.writeText(formattedVesResult.value);
+    await navigator.clipboard.writeText(textToCopy);
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 2000);
   } catch (err) {
@@ -221,81 +242,57 @@ const copyToClipboard = async () => {
     <!-- Campos del Conversor -->
     <div class="relative flex flex-col gap-3 pt-1">
       
-      <!-- Entrada Divisa Extranjera -->
-      <div class="p-4 rounded-2xl border bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200 dark:border-zinc-700/60">
+      <!-- Entrada Divisa Extranjera ($ / € / USDT) -->
+      <div 
+        class="p-4 rounded-2xl border transition-all duration-300"
+        :class="isForeignToVes 
+          ? 'bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/40 dark:border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-sm' 
+          : 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700/60 opacity-90'"
+      >
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          <span 
+            class="text-xs font-bold uppercase tracking-wider transition-colors"
+            :class="isForeignToVes ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'"
+          >
             {{ currencyLabel }}
           </span>
-          <span class="text-xs font-black px-2 py-0.5 rounded-md bg-zinc-200 dark:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200">
+          <span 
+            class="text-xs font-black px-2 py-0.5 rounded-md transition-colors"
+            :class="isForeignToVes ? 'bg-emerald-500/20 text-emerald-800 dark:text-[#00E676]' : 'bg-zinc-200 dark:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200'"
+          >
             {{ selectedRateType === 'BCV' ? 'USD' : selectedRateType }}
           </span>
         </div>
 
         <div class="flex items-center justify-between gap-2">
-          <span class="text-2xl font-black text-emerald-600 dark:text-brandGreen shrink-0 select-none">
+          <span class="text-2xl font-black text-emerald-600 dark:text-[#00E676] shrink-0 select-none">
             {{ currencySymbol }}
           </span>
+
+          <!-- Editable si Divisa -> VES -->
           <input
+            v-if="isForeignToVes"
             v-model="foreignAmount"
             @input="handleForeignInput"
             type="number"
             step="any"
             placeholder="0"
             :disabled="!currentRate"
-            class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400 disabled:opacity-50"
+            class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400 disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
-        </div>
-      </div>
 
-      <!-- Botón Swap (Invertir) -->
-      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-        <button
-          @click="toggleDirection"
-          :disabled="!currentRate"
-          class="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-700 text-emerald-600 dark:text-brandGreen flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-          title="Invertir conversión"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 transition-transform duration-300" :class="{ 'rotate-180': !isForeignToVes }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-          </svg>
-        </button>
-      </div>
-
-      <!-- Entrada / Salida Bolívares -->
-      <div class="p-4 rounded-2xl border bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/30 dark:border-emerald-500/20">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
-            Bolívares
-          </span>
-          <span class="text-xs font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-800 dark:text-brandGreen">
-            VES
-          </span>
-        </div>
-
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-2xl font-black text-emerald-600 dark:text-brandGreen shrink-0 select-none">
-            Bs.
-          </span>
-          <div class="flex items-center gap-2 w-full justify-end">
-            <input
-              v-if="!isForeignToVes && currentRate"
-              v-model="vesAmount"
-              @input="handleVesInput"
-              type="number"
-              step="any"
-              placeholder="0"
-              class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400"
-            />
-            <span v-else :class="['text-3xl font-black truncate', currentRate ? 'text-zinc-900 dark:text-white' : 'text-red-500 text-base']">
-              {{ formattedVesResult }}
+          <!-- Resultado si VES -> Divisa -->
+          <div v-else class="flex items-center gap-2 w-full justify-end">
+            <span class="w-full text-right text-3xl font-black truncate text-zinc-900 dark:text-white">
+              {{ formattedForeignResult }}
             </span>
 
             <button
               v-if="currentRate"
-              @click="copyToClipboard"
-              class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-brandGreen transition-all cursor-pointer active:scale-95 shrink-0"
-              title="Copiar monto"
+              @click="copyToClipboard(foreignAmount)"
+              type="button"
+              class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-[#00E676] transition-all cursor-pointer active:scale-95 shrink-0 ml-1"
+              title="Copiar resultado"
             >
               <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
@@ -304,6 +301,94 @@ const copyToClipboard = async () => {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Botón Swap (Invertir Dirección) -->
+      <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
+        <button
+          @click="toggleDirection"
+          :disabled="!currentRate"
+          type="button"
+          class="w-10 h-10 rounded-full bg-white dark:bg-zinc-800 border-2 border-zinc-200 dark:border-zinc-700 text-emerald-600 dark:text-[#00E676] flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+          title="Invertir dirección"
+        >
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            class="w-5 h-5 transition-transform duration-300" 
+            :class="{ 'rotate-180': !isForeignToVes }" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Entrada / Salida Bolívares (VES) -->
+      <div 
+        class="p-4 rounded-2xl border transition-all duration-300"
+        :class="!isForeignToVes 
+          ? 'bg-emerald-500/5 dark:bg-emerald-500/10 border-emerald-500/40 dark:border-emerald-500/30 ring-1 ring-emerald-500/20 shadow-sm' 
+          : 'bg-zinc-50 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700/60 opacity-90'"
+      >
+        <div class="flex items-center justify-between mb-1.5">
+          <span 
+            class="text-xs font-bold uppercase tracking-wider transition-colors"
+            :class="!isForeignToVes ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'"
+          >
+            Bolívares
+          </span>
+          <span 
+            class="text-xs font-black px-2 py-0.5 rounded-md transition-colors"
+            :class="!isForeignToVes ? 'bg-emerald-500/20 text-emerald-800 dark:text-[#00E676]' : 'bg-zinc-200 dark:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200'"
+          >
+            VES
+          </span>
+        </div>
+
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-2xl font-black text-emerald-600 dark:text-[#00E676] shrink-0 select-none">
+            Bs.
+          </span>
+          <div class="flex items-center gap-2 w-full justify-end">
+            
+            <!-- Editable si VES -> Divisa -->
+            <input
+              v-if="!isForeignToVes"
+              v-model="vesAmount"
+              @input="handleVesInput"
+              type="number"
+              step="any"
+              placeholder="0"
+              :disabled="!currentRate"
+              class="w-full bg-transparent text-right text-3xl font-black text-zinc-900 dark:text-white focus:outline-none placeholder:text-zinc-400 disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+
+            <!-- Resultado si Divisa -> VES -->
+            <div v-else class="flex items-center gap-2 w-full justify-end">
+              <span :class="['text-3xl font-black truncate text-right w-full', currentRate ? 'text-zinc-900 dark:text-white' : 'text-red-500 text-base']">
+                {{ formattedVesResult }}
+              </span>
+
+              <button
+                v-if="currentRate"
+                @click="copyToClipboard(vesAmount)"
+                type="button"
+                class="p-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-[#00E676] transition-all cursor-pointer active:scale-95 shrink-0 ml-1"
+                title="Copiar resultado"
+              >
+                <svg v-if="copied" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                </svg>
+                <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            </div>
+
           </div>
         </div>
       </div>
