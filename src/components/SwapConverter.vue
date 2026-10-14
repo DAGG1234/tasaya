@@ -269,11 +269,12 @@ const copyToClipboard = async (textToCopy: string) => {
             {{ currencySymbol }}
           </span>
 
-          <!-- Editable si Divisa -> VES -->
+          <!-- Editable si Divisa -> VES (Selecciona el texto automáticamente al enfocar) -->
           <input
             v-if="isForeignToVes"
             v-model="foreignAmount"
             @input="handleForeignInput"
+            @focus="($event.target as HTMLInputElement).select()"
             type="number"
             step="any"
             placeholder="0"
@@ -355,11 +356,12 @@ const copyToClipboard = async (textToCopy: string) => {
           </span>
           <div class="flex items-center gap-2 w-full justify-end">
             
-            <!-- Editable si VES -> Divisa -->
+            <!-- Editable si VES -> Divisa (Selecciona el texto automáticamente al enfocar) -->
             <input
               v-if="!isForeignToVes"
               v-model="vesAmount"
               @input="handleVesInput"
+              @focus="($event.target as HTMLInputElement).select()"
               type="number"
               step="any"
               placeholder="0"
